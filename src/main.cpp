@@ -5,6 +5,7 @@
 #include <vector>
 #include <random>
 #include <chrono>
+#include <algorithm> // para std::min/std::max
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -25,6 +26,13 @@ struct Boid {
     float wingState; // para animar asas
 };
 
+// ---------- OBSTÁCULOS ----------
+struct Obstacle {                         // <<< OBSTÁCULOS
+    glm::vec3 pos;   // posição no plano (y ~ 0)
+    float radius;    // raio aproximado do obstáculo
+    float height;    // altura do obstáculo
+};
+
 std::vector<Boid> boids;
 Boid targetBoid;
 bool paused = false;
@@ -34,20 +42,24 @@ float worldSize = 200.0f;
 // parâmetros do comportamento
 float separationRadius = 5.0f;
 float neighborRadius = 20.0f;
-float maxSpeed = 15.0f;
-float maxForce = 5.0f;
+float maxSpeed = 35.0f;
+float maxForce = 14.0f;
 float separationWeight = 1.5f;
 float cohesionWeight = 1.0f;
 float alignmentWeight = 1.0f;
 int initialBoids = 60;
 
 // ---------- NOVOS PARÂMETROS DO TARGET ORBITAL ----------
-float targetOrbitRadius = 30.0f;   // raio da órbita em torno da torre  // <<<
-float targetOrbitHeight = 12.0f;   // altura fixa do target             // <<<
-float targetAngularSpeed = 0.6f;    // velocidade angular inicial (rad/s)// <<<
-float targetMinAngularSpeed = 0.1f;    // limite mínimo                      // <<<
-float targetMaxAngularSpeed = 2.0f;    // limite máximo                      // <<<
-float targetAngle = 0.0f;    // ângulo atual na órbita             // <<<
+float targetOrbitRadius = 60.0f;   // raio da órbita em torno da torre
+float targetOrbitHeight = 12.0f;   // altura fixa do target
+float targetAngularSpeed = 0.6f;   // velocidade angular inicial (rad/s)
+float targetMinAngularSpeed = 0.1f;
+float targetMaxAngularSpeed = 2.0f;
+float targetAngle = 0.0f;          // ângulo atual na órbita
+
+// Obstáculos
+std::vector<Obstacle> obstacles;   // <<< OBSTÁCULOS
+int obstacleCount = 7;             // quantidade de obstáculos
 
 // Temporização
 double lastTime = 0.0;
@@ -95,7 +107,6 @@ void main() {
     vec3 lightDir = normalize(lightPos - FragPos);
     float diff = max(dot(norm, lightDir), 0.0);
 
-    // simple ambient + diffuse + spec
     float ambient = 0.25;
     float spec = 0.0;
     if(diff > 0.0) {
@@ -271,13 +282,12 @@ Mesh createPlane() {
 
 Mesh createCone(int slices = 32) {
     std::vector<float> data;
-    std::vector<unsigned int> idx;
     float height = 6.0f;
     float radius = 3.0f;
     glm::vec3 tip(0.0f, height, 0.0f);
     for (int i = 0; i < slices; i++) {
-        float a0 = (2.0f * M_PI * i) / slices;
-        float a1 = (2.0f * M_PI * (i + 1)) / slices;
+        float a0 = (2.0f * (float)M_PI * i) / slices;
+        float a1 = (2.0f * (float)M_PI * (i + 1)) / slices;
         glm::vec3 p0(radius * cos(a0), 0.0f, radius * sin(a0));
         glm::vec3 p1(radius * cos(a1), 0.0f, radius * sin(a1));
         glm::vec3 n = glm::normalize(glm::cross(p0 - tip, p1 - tip));
@@ -290,8 +300,8 @@ Mesh createCone(int slices = 32) {
     glm::vec3 nbase(0, -1, 0);
     for (int i = 0; i < slices - 2; i++) {
         float a0 = 0;
-        float a1 = (2.0f * M_PI * (i + 1)) / slices;
-        float a2 = (2.0f * M_PI * (i + 2)) / slices;
+        float a1 = (2.0f * (float)M_PI * (i + 1)) / slices;
+        float a2 = (2.0f * (float)M_PI * (i + 2)) / slices;
         glm::vec3 p0(radius * cos(a0), 0, radius * sin(a0));
         glm::vec3 p1(radius * cos(a1), 0, radius * sin(a1));
         glm::vec3 p2(radius * cos(a2), 0, radius * sin(a2));
@@ -324,6 +334,35 @@ glm::vec3 limit(const glm::vec3& v, float maxLen) {
     return v;
 }
 
+// ---------- INICIALIZAÇÃO DOS OBSTÁCULOS ----------
+void initObstacles() {                           // <<< OBSTÁCULOS
+    obstacles.clear();
+    for (int i = 0; i < obstacleCount; ++i) {
+
+        float ang = randf(0.0f, 2.0f * (float)M_PI);
+
+        // -------------------------------
+        // DISTÂNCIA EXATA SOBRE O RAIO
+        // Faixa = radius - 10  até  radius + 10
+        // -------------------------------
+        float minR = targetOrbitRadius - 10.0f;
+        float maxR = targetOrbitRadius + 10.0f;
+        float dist = randf(minR, maxR);
+
+        float x = std::cos(ang) * dist;
+        float z = std::sin(ang) * dist;
+
+        float radius = randf(4.0f, 10.0f);   // tamanhos variados
+        float height = randf(8.0f, 18.0f);   // alturas variadas
+
+        Obstacle o;
+        o.pos = glm::vec3(x, 0.0f, z);
+        o.radius = radius;
+        o.height = height;
+        obstacles.push_back(o);
+    }
+}
+
 void initBoids(int n) {
     boids.clear();
     boids.reserve(n);
@@ -331,16 +370,16 @@ void initBoids(int n) {
         Boid b;
         b.pos = glm::vec3(randf(-20, 20), randf(1, 10), randf(-20, 20));
         glm::vec3 dir(randf(-1, 1), randf(-0.2f, 0.2f), randf(-1, 1));
-        b.vel = glm::normalize(dir) * randf(2.0f, 6.0f);
-        b.wingState = randf(0, 2 * M_PI);
+        b.vel = glm::normalize(dir) * randf(8.0f, 16.0f);
+        b.wingState = randf(0, 2 * (float)M_PI);
         boids.push_back(b);
     }
 
-    // ---------- INICIALIZAÇÃO DO TARGET EM ÓRBITA ----------
-    targetAngle = 0.0f;                                                             // <<<
-    targetBoid.pos = glm::vec3(targetOrbitRadius, targetOrbitHeight, 0.0f);        // <<<
-    targetBoid.vel = glm::vec3(0.0f, 0.0f, targetOrbitRadius * targetAngularSpeed);// <<<
-    targetBoid.wingState = 0.0f;                                                   // <<<
+    // INICIALIZAÇÃO DO TARGET EM ÓRBITA
+    targetAngle = 0.0f;
+    targetBoid.pos = glm::vec3(targetOrbitRadius, targetOrbitHeight, 0.0f);
+    targetBoid.vel = glm::vec3(0.0f, 0.0f, targetOrbitRadius * targetAngularSpeed);
+    targetBoid.wingState = 0.0f;
 }
 
 glm::vec3 computeSeparation(int i) {
@@ -349,7 +388,7 @@ glm::vec3 computeSeparation(int i) {
     for (int j = 0; j < (int)boids.size(); j++) {
         if (j == i) continue;
         float d = glm::distance(boids[i].pos, boids[j].pos);
-        if (d < separationRadius && d>0.001f) {
+        if (d < separationRadius && d > 0.001f) {
             glm::vec3 diff = boids[i].pos - boids[j].pos;
             diff = glm::normalize(diff) / d;
             steer += diff;
@@ -437,23 +476,46 @@ glm::vec3 wander(const Boid& b) {
     return circleCenter + offset;
 }
 
+// ---------- DESVIO DE OBSTÁCULOS ----------
+glm::vec3 avoidObstacles(const Boid& b) {         // <<< OBSTÁCULOS
+    glm::vec3 steer(0.0f);
+    if (obstacles.empty()) return steer;
+
+    for (const auto& o : obstacles) {
+        glm::vec3 toBoid = b.pos - o.pos;
+        glm::vec2 horiz(toBoid.x, toBoid.z);
+        float dist = glm::length(horiz);
+
+        // só considera se estiver dentro de um raio de segurança
+        float safeRadius = o.radius + 6.0f;
+        if (dist < safeRadius && dist > 0.001f) {
+            // apenas se estiver na faixa de altura do obstáculo
+            if (b.pos.y <= o.height + 2.0f) {
+                glm::vec3 away = glm::normalize(glm::vec3(horiz.x, 0.0f, horiz.y));
+                float strength = (safeRadius - dist) / safeRadius; // mais forte quanto mais perto
+                steer += away * maxForce * 5.0f * strength;
+            }
+        }
+    }
+
+    return steer;
+}
+
 void updateBoids(float dt) {
 
     // ---------- MOVIMENTO SUAVE DO TARGET EM ÓRBITA ----------
-    glm::vec3 prevPos = targetBoid.pos;                          // <<<
-    targetAngle += targetAngularSpeed * dt;                      // <<<
-    if (targetAngle > 2.0f * M_PI) targetAngle -= 2.0f * M_PI;   // <<< normaliza
-    if (targetAngle < 0.0f) targetAngle += 2.0f * M_PI;          // <<<
-    targetBoid.pos = glm::vec3(                                 // <<<
+    glm::vec3 prevPos = targetBoid.pos;
+    targetAngle += targetAngularSpeed * dt;
+    if (targetAngle > 2.0f * (float)M_PI) targetAngle -= 2.0f * (float)M_PI;
+    if (targetAngle < 0.0f) targetAngle += 2.0f * (float)M_PI;
+    targetBoid.pos = glm::vec3(
         targetOrbitRadius * std::cos(targetAngle),
         targetOrbitHeight,
         targetOrbitRadius * std::sin(targetAngle)
     );
     if (dt > 0.0f) {
-        targetBoid.vel = (targetBoid.pos - prevPos) / dt;       // <<< vel tangente à órbita
+        targetBoid.vel = (targetBoid.pos - prevPos) / dt;
     }
-
-    // (sem controle de setas e sem wander, então nada de tremedeira)
 
     std::vector<glm::vec3> newVel(boids.size());
     for (size_t i = 0; i < boids.size(); i++) {
@@ -461,10 +523,19 @@ void updateBoids(float dt) {
         glm::vec3 s = computeSeparation((int)i) * separationWeight;
         glm::vec3 a = computeAlignment((int)i) * alignmentWeight;
         glm::vec3 c = computeCohesion((int)i) * cohesionWeight;
-        glm::vec3 t = seekTarget(b, targetBoid) * 0.6f;
+        float distToTarget = glm::distance(b.pos, targetBoid.pos);
+
+        // Intensidade varia conforme a distância
+        float seekWeight =
+            (distToTarget > 50.0f ? 2.8f :
+                (distToTarget > 25.0f ? 1.8f :
+                    1.0f));
+
+        glm::vec3 t = seekTarget(b, targetBoid) * seekWeight;
 
         glm::vec3 accel = s + a + c + t;
 
+        // Desvio da torre central
         glm::vec3 towerPos(0.0f, 0.0f, 0.0f);
         float towerRadius = 6.0f;
         glm::vec3 diff = b.pos - towerPos;
@@ -473,6 +544,9 @@ void updateBoids(float dt) {
             glm::vec3 away = glm::normalize(glm::vec3(diff.x, 0.0f, diff.z)) * maxForce * 5.0f;
             accel += glm::vec3(away.x, 0.5f * away.y, away.z);
         }
+
+        // Desvio dos outros obstáculos (NÃO aplicado ao target, só aos boids normais)
+        accel += avoidObstacles(b);            // <<< OBSTÁCULOS
 
         glm::vec3 v = b.vel + accel * dt;
         v = limit(v, maxSpeed);
@@ -493,8 +567,8 @@ void updateBoids(float dt) {
         boids[i].wingState += dt * (1.0f + glm::length(boids[i].vel) * 0.1f);
     }
 
-    // animação das asas do target (opcional)
-    targetBoid.wingState += dt * (1.0f + glm::length(targetBoid.vel) * 0.1f); // <<<
+    // animação das asas do target
+    targetBoid.wingState += dt * (1.0f + glm::length(targetBoid.vel) * 0.1f);
 }
 
 // ---------- Input handling ----------
@@ -502,7 +576,7 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
 
     static double lastPlus = 0.0;
-    static double lastSpeedChange = 0.0;              // <<< controle de PgUp/PgDn
+    static double lastSpeedChange = 0.0;
     double now = glfwGetTime();
 
     if (glfwGetKey(window, GLFW_KEY_KP_ADD) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) {
@@ -532,12 +606,9 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) cameraMode = 2;
     if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) cameraMode = 3;
 
-    // ---------- REMOVIDO: CONTROLE POR SETAS DO TARGET ----------
-    // (nada de GLFW_KEY_UP/DOWN/LEFT/RIGHT aqui)                   // <<<
-
-    // ---------- NOVO: PageUp/PageDown CONTROLAM VELOCIDADE ANGULAR ----------
-    float speedStep = 0.05f;                                      // <<<
-    if (now - lastSpeedChange > 0.05) {                           // pequena "trava" de tempo
+    // PageUp/PageDown CONTROLAM VELOCIDADE ANGULAR
+    float speedStep = 0.05f;
+    if (now - lastSpeedChange > 0.05) {
         if (glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS) {
             targetAngularSpeed = std::min(targetAngularSpeed + speedStep, targetMaxAngularSpeed);
             lastSpeedChange = now;
@@ -559,9 +630,7 @@ void setVec3(GLuint prog, const std::string& name, const glm::vec3& v) {
     glUniform3fv(loc, 1, glm::value_ptr(v));
 }
 
-// -------------------------------------------
 // Projeção simples no plano Y=0 (para sombras)
-// -------------------------------------------
 glm::mat4 shadowMatrix(const glm::vec3& lightDir) {
     glm::mat4 m(1.0f);
     float lx = lightDir.x;
@@ -603,6 +672,7 @@ int main() {
     Mesh cone = createCone(48);
 
     initBoids(initialBoids);
+    initObstacles(); // <<< OBSTÁCULOS: cria os obstáculos após inicializar boids/target
 
     lastTime = glfwGetTime();
 
@@ -658,6 +728,7 @@ int main() {
         setVec3(prog, "lightPos", glm::vec3(30.0f, 80.0f, 40.0f));
         setVec3(prog, "viewPos", camPos);
 
+        // Plano
         glm::mat4 model = glm::mat4(1.0f);
         setMat4(prog, "model", model);
         setVec3(prog, "baseColor", glm::vec3(0.6f, 0.75f, 0.55f));
@@ -668,6 +739,7 @@ int main() {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+        // Sombras dos boids
         for (auto& b : boids) {
             glm::vec3 dir = glm::normalize(b.vel + glm::vec3(0.0001f));
             glm::vec3 up(0, 1, 0);
@@ -704,15 +776,28 @@ int main() {
 
         glDisable(GL_BLEND);
 
+        // Torre central
         model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
         setMat4(prog, "model", model);
         setVec3(prog, "baseColor", glm::vec3(0.75f, 0.5f, 0.4f));
         glBindVertexArray(cone.VAO);
         glDrawArrays(GL_TRIANGLES, 0, cone.count);
 
+        // ---------- DESENHO DOS OUTROS OBSTÁCULOS ----------
+        for (const auto& o : obstacles) {                                      // <<< OBSTÁCULOS
+            glm::mat4 mOb =
+                glm::translate(glm::mat4(1.0f), glm::vec3(o.pos.x, 0.0f, o.pos.z))
+                * glm::scale(glm::mat4(1.0f),
+                    glm::vec3(o.radius / 3.0f, o.height / 6.0f, o.radius / 3.0f));
+            setMat4(prog, "model", mOb);
+            setVec3(prog, "baseColor", glm::vec3(0.3f, 0.3f, 0.8f)); // cor diferente dos boids/torre
+            glBindVertexArray(cone.VAO);
+            glDrawArrays(GL_TRIANGLES, 0, cone.count);
+        }
+
         // ---------- DESENHO DO TARGET ORIENTADO COMO BOID ----------
         {
-            glm::vec3 dir = glm::normalize(targetBoid.vel + glm::vec3(0.0001f)); // "cabeça" aponta pra onde anda // <<<
+            glm::vec3 dir = glm::normalize(targetBoid.vel + glm::vec3(0.0001f));
             glm::vec3 up(0, 1, 0);
             glm::vec3 right = glm::normalize(glm::cross(up, dir));
             glm::vec3 newUp = glm::normalize(glm::cross(dir, right));
@@ -722,7 +807,7 @@ int main() {
             baseRot[1] = glm::vec4(newUp, 0.0f);
             baseRot[2] = glm::vec4(dir, 0.0f);
 
-            float wingAngle = std::sin(targetBoid.wingState * 4.0f) * glm::radians(25.0f); // opcional // <<<
+            float wingAngle = std::sin(targetBoid.wingState * 4.0f) * glm::radians(25.0f);
             glm::mat4 wingRot = glm::rotate(glm::mat4(1.0f), wingAngle, glm::vec3(0.0f, 0.0f, 1.0f));
 
             glm::mat4 modelT =
@@ -737,6 +822,7 @@ int main() {
             glDrawArrays(GL_TRIANGLES, 0, bird.count);
         }
 
+        // Boids normais
         for (auto& b : boids) {
             glm::vec3 dir = glm::normalize(b.vel + glm::vec3(0.0001f));
             glm::vec3 up(0, 1, 0);
