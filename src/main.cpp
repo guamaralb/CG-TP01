@@ -427,9 +427,33 @@ glm::vec3 seekTarget(const Boid& b, const Boid& target) {
     return limit(steer, maxForce);
 }
 
+glm::vec3 wander(const Boid& b) {
+    static float wanderAngle = 0.0f;
+    wanderAngle += randf(-0.5f, 0.5f); // mudança lenta e suave
+
+    float circleDist = 8.0f;
+    float circleRadius = 4.0f;
+
+    glm::vec3 circleCenter = glm::normalize(b.vel) * circleDist;
+
+    glm::vec3 offset(
+        circleRadius * cos(wanderAngle),
+        randf(-0.3f, 0.3f), // leve variação vertical
+        circleRadius * sin(wanderAngle)
+    );
+
+    return circleCenter + offset;
+}
+
+
 void updateBoids(float dt) {
-    // update target position (simple movement)
+    // autonomous movement for target boid
+    glm::vec3 desired = wander(targetBoid);
+    desired = glm::normalize(desired) * glm::length(targetBoid.vel); // mantém velocidade do usuário
+
+    targetBoid.vel = desired;
     targetBoid.pos += targetBoid.vel * dt;
+
 
     // keep target inside world bounds (wrap)
     if (targetBoid.pos.x > worldSize) targetBoid.pos.x = -worldSize;
@@ -521,8 +545,21 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) targetBoid.vel += glm::vec3(0, 0, tAccel) * 0.02f;
     if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) targetBoid.vel += glm::vec3(-tAccel, 0, 0) * 0.02f;
     if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) targetBoid.vel += glm::vec3(tAccel, 0, 0) * 0.02f;
-    if (glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS) targetBoid.vel *= 1.01f;
-    if (glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS) targetBoid.vel *= 0.99f;
+    
+    float speedChange = 1.0f;
+
+    if (glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS) {
+        float speed = glm::length(targetBoid.vel);
+        speed = std::min(speed + speedChange, 40.0f); // limite opcional
+        targetBoid.vel = glm::normalize(targetBoid.vel) * speed;
+    }
+
+    if (glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS) {
+        float speed = glm::length(targetBoid.vel);
+        speed = std::max(speed - speedChange, 1.0f);
+        targetBoid.vel = glm::normalize(targetBoid.vel) * speed;
+    }
+
 }
 
 // ---------- Render helpers ----------
