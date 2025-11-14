@@ -47,12 +47,12 @@ float maxForce = 14.0f;
 float separationWeight = 1.5f;
 float cohesionWeight = 1.0f;
 float alignmentWeight = 1.0f;
-int initialBoids = 60;
+int initialBoids = 10;
 
 // ---------- NOVOS PARÂMETROS DO TARGET ORBITAL ----------
 float targetOrbitRadius = 60.0f;   // raio da órbita em torno da torre
 float targetOrbitHeight = 12.0f;   // altura fixa do target
-float targetAngularSpeed = 0.6f;   // velocidade angular inicial (rad/s)
+float targetAngularSpeed = 0.3f;   // velocidade angular inicial (rad/s)
 float targetMinAngularSpeed = 0.1f;
 float targetMaxAngularSpeed = 2.0f;
 float targetAngle = 0.0f;          // ângulo atual na órbita
@@ -766,6 +766,41 @@ int main() {
                 * baseRot
                 * wingRot
                 * glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 0.001f, 1.0f));
+
+            setMat4(prog, "model", modelS);
+            setVec3(prog, "baseColor", glm::vec3(0.0f, 0.0f, 0.0f));
+
+            glBindVertexArray(bird.VAO);
+            glDrawArrays(GL_TRIANGLES, 0, bird.count);
+        }
+
+        // Sombra do TARGET
+        {
+            glm::vec3 dir = glm::normalize(targetBoid.vel + glm::vec3(0.0001f));
+            glm::vec3 up(0, 1, 0);
+            glm::vec3 right = glm::normalize(glm::cross(up, dir));
+            glm::vec3 newUp = glm::normalize(glm::cross(dir, right));
+
+            glm::mat4 baseRot(1.0f);
+            baseRot[0] = glm::vec4(right, 0.0f);
+            baseRot[1] = glm::vec4(newUp, 0.0f);
+            baseRot[2] = glm::vec4(dir, 0.0f);
+
+            float wingAngle = std::sin(targetBoid.wingState * 4.0f) * glm::radians(25.0f);
+            glm::mat4 wingRot = glm::rotate(glm::mat4(1.0f), wingAngle, glm::vec3(0.0f, 0.0f, 1.0f));
+
+            glm::vec3 shadowPos = glm::vec3(targetBoid.pos.x, 0.01f, targetBoid.pos.z);
+
+            glm::mat4 tilt = glm::mat4(1.0f);
+            tilt[1][0] = -lightDir.x / lightDir.y;
+            tilt[1][2] = -lightDir.z / lightDir.y;
+
+            glm::mat4 modelS =
+                glm::translate(glm::mat4(1.0f), shadowPos)
+                * tilt
+                * baseRot
+                * wingRot
+                * glm::scale(glm::mat4(1.0f), glm::vec3(1.4f, 0.001f, 1.4f)); // target = maior
 
             setMat4(prog, "model", modelS);
             setVec3(prog, "baseColor", glm::vec3(0.0f, 0.0f, 0.0f));
